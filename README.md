@@ -42,6 +42,16 @@ flutter build linux         # equivalent, manual
 
 Install a built APK: `adb install -r build/app/outputs/flutter-apk/app-debug.apk`
 
+### App icon
+
+The source icon is `assets/icon/logo.png`. The Android launcher icon (`android/app/src/main/res/mipmap-*/ic_launcher.png`) is generated from it via [`flutter_launcher_icons`](https://pub.dev/packages/flutter_launcher_icons) (config in `pubspec.yaml`); after changing the source image, regenerate with:
+
+```bash
+dart run flutter_launcher_icons
+```
+
+On Linux, `just reinstall` installs the same icon into the `hicolor` icon theme and points the desktop entry at it, so it shows up in the app launcher/taskbar.
+
 ## Analysis
 
 ```bash
