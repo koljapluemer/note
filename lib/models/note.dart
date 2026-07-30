@@ -13,6 +13,9 @@ class NoteFile {
 
   String get body => data['body'] as String? ?? '';
 
+  /// `notes: false` marks the note as disabled — excluded from Queue.
+  bool get disabled => data['notes'] == false;
+
   List<String> get notes {
     final raw = data['notes'];
     if (raw is List) return raw.map((e) => e.toString()).toList();
@@ -23,5 +26,14 @@ class NoteFile {
     final updated = List<String>.from(notes)..add(note);
     data['notes'] = updated;
     await file.writeAsString(jsonEncode(data));
+  }
+
+  Future<void> disable() async {
+    data['notes'] = false;
+    await file.writeAsString(jsonEncode(data));
+  }
+
+  Future<void> delete() async {
+    if (await file.exists()) await file.delete();
   }
 }

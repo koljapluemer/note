@@ -58,6 +58,13 @@ class _NoteAppState extends State<NoteApp> {
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
+      // Counts taps anywhere in the app so a pending delete's undo window
+      // can close itself after a couple of interactions elsewhere.
+      builder: (context, child) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _repository.registerInteraction(),
+        child: child,
+      ),
       home: _buildHome(),
     );
   }

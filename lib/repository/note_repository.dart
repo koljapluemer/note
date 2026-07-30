@@ -40,7 +40,12 @@ class NoteRepository extends ChangeNotifier {
   List<NoteFile> _notes = [];
   final Random _random = Random();
 
+  NoteFile? _pendingDelete;
+  int _interactionsSincePendingDelete = 0;
+
   int get count => _notes.length;
+
+  bool get hasPendingDelete => _pendingDelete != null;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -82,8 +87,52 @@ class NoteRepository extends ChangeNotifier {
   }
 
   NoteFile? randomNote() {
-    if (_notes.isEmpty) return null;
-    return _notes[_random.nextInt(_notes.length)];
+    final available = _notes.where(
+      (n) => !n.disabled && n != _pendingDelete,
+    ).toList();
+    if (available.isEmpty) return null;
+    return available[_random.nextInt(available.length)];
+  }
+
+  Future<void> disableNote(NoteFile note) async {
+    await note.disable();
+    notifyListeners();
+  }
+
+  /// Hides [note] from the queue right away, but only deletes its file once
+  /// [registerInteraction] has been called twice without a [cancelPendingDelete].
+  void beginPendingDelete(NoteFile note) {
+    if (_pendingDelete != null) {
+      // Only one delete can be pending at a time; finalize the earlier one
+      // immediately rather than silently losing track of it.
+      _finalizePendingDelete();
+    }
+    _pendingDelete = note;
+    _interactionsSincePendingDelete = 0;
+    notifyListeners();
+  }
+
+  void cancelPendingDelete() {
+    if (_pendingDelete == null) return;
+    _pendingDelete = null;
+    notifyListeners();
+  }
+
+  void registerInteraction() {
+    if (_pendingDelete == null) return;
+    _interactionsSincePendingDelete++;
+    if (_interactionsSincePendingDelete >= 2) {
+      _finalizePendingDelete();
+    }
+  }
+
+  Future<void> _finalizePendingDelete() async {
+    final note = _pendingDelete;
+    _pendingDelete = null;
+    if (note == null) return;
+    await note.delete();
+    _notes.remove(note);
+    notifyListeners();
   }
 
   Future<void> addNote(String text) async {

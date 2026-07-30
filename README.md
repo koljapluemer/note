@@ -62,7 +62,7 @@ Each note is one `*.json` file directly inside the data folder, e.g.:
 ```
 
 - `body` (string) — the note content, rendered as markdown in Queue.
-- `notes` (string array, optional) — annotations appended from the Queue screen.
+- `notes` (string array, optional) — annotations appended from the Queue screen. May also be the literal `false` (not an empty array) to mark the note as **disabled**: it's excluded from Queue's random draw so it stops coming up for annotation. Set via the Queue screen's "Disable" button.
 - Everything else (`rels`, `extraData`, or any other top-level key) is opaque to this app: it's read in, kept in memory, and written back byte-for-byte unchanged whenever a file is saved. The app only ever adds/updates `notes`.
 
 See `lib/models/note.dart` for the read/write logic and `lib/repository/note_repository.dart` for the folder scan + in-memory store.
@@ -70,5 +70,5 @@ See `lib/models/note.dart` for the read/write logic and `lib/repository/note_rep
 ## Screens
 
 - **Add** — a full-screen text box. "Add" slugs the first few words of the text, appends a random 6-hex-char suffix for uniqueness, and writes a new `{"body": "..."}` file to the data folder. "Clear" just resets the text box.
-- **Queue** — loads a random note and renders its `body` as markdown. A short text field above it lets you type an annotation; "Save" appends it to that note's `notes` array (writing the file back to disk) and loads the next random note; "Skip" discards the field and loads the next random note without writing anything.
+- **Queue** — loads a random note (skipping disabled ones) and renders its `body` as markdown. A short text field above it lets you type an annotation; "Save" appends it to that note's `notes` array (writing the file back to disk) and loads the next random note; "Skip" discards the field and loads the next random note without writing anything. Below that, "Disable" sets `notes: false` on the note so it never comes up in Queue again, and "Delete" removes it from Queue immediately and shows an "Undo" snackbar; the file is only actually deleted from disk once you've interacted with the app twice more without hitting undo.
 - **Settings** — shows the current data folder and loaded note count, lets you pick a different folder, and (Android only) lets you (re-)grant full disk access.
