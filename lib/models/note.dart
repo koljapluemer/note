@@ -1,36 +1,30 @@
-import 'dart:convert';
 import 'dart:io';
 
-/// A single note backed by a JSON file on disk.
-///
-/// Keeps the full decoded JSON so unrelated properties (e.g. `rels`,
-/// `extraData`) round-trip untouched when only `notes` is updated.
+/// Collapses newlines (and surrounding whitespace) into single spaces —
+/// notes are always stored as a single line of plain text.
+String collapseNewlines(String text) =>
+    text.replaceAll(RegExp(r'\s*\n+\s*'), ' ').trim();
+
+/// A single plain-text note backed by a `.txt` file on disk.
 class NoteFile {
-  NoteFile({required this.file, required this.data});
+  NoteFile({required this.file, required String body}) : _body = body;
 
   final File file;
-  final Map<String, dynamic> data;
+  String _body;
 
-  String get body => data['body'] as String? ?? '';
+  String get body => _body;
 
-  /// `notes: false` marks the note as disabled — excluded from Queue.
-  bool get disabled => data['notes'] == false;
-
-  List<String> get notes {
-    final raw = data['notes'];
-    if (raw is List) return raw.map((e) => e.toString()).toList();
-    return const [];
+  /// A single-line, whitespace-collapsed, truncated preview of [body].
+  /// Used anywhere a note needs a compact label — there's no title field.
+  String get preview {
+    final collapsed = collapseNewlines(_body);
+    if (collapsed.isEmpty) return '(empty note)';
+    return collapsed.length > 60 ? '${collapsed.substring(0, 60)}…' : collapsed;
   }
 
-  Future<void> appendNote(String note) async {
-    final updated = List<String>.from(notes)..add(note);
-    data['notes'] = updated;
-    await file.writeAsString(jsonEncode(data));
-  }
-
-  Future<void> disable() async {
-    data['notes'] = false;
-    await file.writeAsString(jsonEncode(data));
+  Future<void> setBody(String text) async {
+    _body = text;
+    await file.writeAsString(text);
   }
 
   Future<void> delete() async {

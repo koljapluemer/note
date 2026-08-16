@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../repository/note_repository.dart';
-import 'add_screen.dart';
+import 'list_screen.dart';
+import 'note_form_screen.dart';
 import 'queue_screen.dart';
 import 'settings_screen.dart';
 
@@ -20,8 +21,9 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      AddScreen(repository: widget.repository),
+      NoteFormScreen(repository: widget.repository),
       QueueScreen(repository: widget.repository),
+      ListScreen(repository: widget.repository),
       SettingsScreen(repository: widget.repository),
     ];
     return Scaffold(
@@ -34,6 +36,7 @@ class _HomeShellState extends State<HomeShell> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.add), label: 'Add'),
           NavigationDestination(icon: Icon(Icons.layers), label: 'Queue'),
+          NavigationDestination(icon: Icon(Icons.list), label: 'List'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

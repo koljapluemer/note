@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -10,26 +9,34 @@ import '../models/note.dart';
 
 const _prefsFolderKey = 'data_folder';
 
-/// Parses every .json file in [folderPath]. Runs in a background isolate via
+/// Reads every .txt file in [folderPath]. Runs in a background isolate via
 /// [compute] so scanning thousands of files never blocks the UI thread.
-List<Map<String, dynamic>> parseFolderIsolate(String folderPath) {
+List<Map<String, String>> parseFolderIsolate(String folderPath) {
   final dir = Directory(folderPath);
-  final results = <Map<String, dynamic>>[];
+  final results = <Map<String, String>>[];
   if (!dir.existsSync()) return results;
   for (final entity in dir.listSync()) {
-    if (entity is! File || !entity.path.toLowerCase().endsWith('.json')) {
+    if (entity is! File || !entity.path.toLowerCase().endsWith('.txt')) {
       continue;
     }
     try {
-      final decoded = jsonDecode(entity.readAsStringSync());
-      if (decoded is Map<String, dynamic>) {
-        results.add({'path': entity.path, 'data': decoded});
-      }
+      results.add({'path': entity.path, 'body': entity.readAsStringSync()});
     } catch (_) {
-      // Skip unreadable / malformed files.
+      // Skip unreadable files.
     }
   }
   return results;
+}
+
+/// A pending note deletion awaiting either an explicit undo
+/// ([NoteRepository.cancelPending]) or two more app-wide interactions
+/// ([NoteRepository.registerInteraction]) before it's actually applied.
+class _PendingDelete {
+  _PendingDelete({required this.id, required this.note});
+
+  final int id;
+  final NoteFile note;
+  int interactions = 0;
 }
 
 class NoteRepository extends ChangeNotifier {
@@ -40,12 +47,12 @@ class NoteRepository extends ChangeNotifier {
   List<NoteFile> _notes = [];
   final Random _random = Random();
 
-  NoteFile? _pendingDelete;
-  int _interactionsSincePendingDelete = 0;
+  final List<_PendingDelete> _pending = [];
+  int _nextPendingId = 0;
 
   int get count => _notes.length;
 
-  bool get hasPendingDelete => _pendingDelete != null;
+  List<NoteFile> get notes => List.unmodifiable(_notes);
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -72,10 +79,7 @@ class NoteRepository extends ChangeNotifier {
       final parsed = await compute(parseFolderIsolate, folderPath!);
       _notes = [
         for (final entry in parsed)
-          NoteFile(
-            file: File(entry['path'] as String),
-            data: entry['data'] as Map<String, dynamic>,
-          ),
+          NoteFile(file: File(entry['path']!), body: entry['body']!),
       ];
     } catch (e) {
       loadError = e.toString();
@@ -86,69 +90,85 @@ class NoteRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<NoteFile> get _available =>
+      _notes.where((n) => !isPendingDeleteNote(n)).toList();
+
   NoteFile? randomNote() {
-    final available = _notes.where(
-      (n) => !n.disabled && n != _pendingDelete,
-    ).toList();
+    final available = _available;
     if (available.isEmpty) return null;
     return available[_random.nextInt(available.length)];
   }
 
-  Future<void> disableNote(NoteFile note) async {
-    await note.disable();
-    notifyListeners();
+  /// Up to [count] distinct random notes (fewer if not enough are available).
+  List<NoteFile> randomNotes(int count) {
+    final available = List<NoteFile>.from(_available)..shuffle(_random);
+    return available.take(count).toList();
   }
 
-  /// Hides [note] from the queue right away, but only deletes its file once
-  /// [registerInteraction] has been called twice without a [cancelPendingDelete].
-  void beginPendingDelete(NoteFile note) {
-    if (_pendingDelete != null) {
-      // Only one delete can be pending at a time; finalize the earlier one
-      // immediately rather than silently losing track of it.
-      _finalizePendingDelete();
+  /// Hides [note] right away, but only deletes its file once
+  /// [registerInteraction] has been called twice without a matching
+  /// [cancelPending]. Returns an id to pass to [cancelPending] for undo, or
+  /// to [isPendingActive] to check status.
+  int beginPendingDeleteNote(NoteFile note) {
+    for (final a in _pending) {
+      if (a.note == note) return a.id;
     }
-    _pendingDelete = note;
-    _interactionsSincePendingDelete = 0;
+    final id = _nextPendingId++;
+    _pending.add(_PendingDelete(id: id, note: note));
     notifyListeners();
+    return id;
   }
 
-  void cancelPendingDelete() {
-    if (_pendingDelete == null) return;
-    _pendingDelete = null;
+  bool isPendingDeleteNote(NoteFile note) =>
+      _pending.any((a) => a.note == note);
+
+  bool isPendingActive(int id) => _pending.any((a) => a.id == id);
+
+  void cancelPending(int id) {
+    final index = _pending.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+    _pending.removeAt(index);
     notifyListeners();
   }
 
   void registerInteraction() {
-    if (_pendingDelete == null) return;
-    _interactionsSincePendingDelete++;
-    if (_interactionsSincePendingDelete >= 2) {
-      _finalizePendingDelete();
+    if (_pending.isEmpty) return;
+    final ready = <_PendingDelete>[];
+    for (final a in _pending) {
+      a.interactions++;
+      if (a.interactions >= 2) ready.add(a);
     }
+    if (ready.isEmpty) return;
+    for (final a in ready) {
+      _pending.remove(a);
+    }
+    _finalize(ready);
   }
 
-  Future<void> _finalizePendingDelete() async {
-    final note = _pendingDelete;
-    _pendingDelete = null;
-    if (note == null) return;
-    await note.delete();
-    _notes.remove(note);
+  Future<void> _finalize(List<_PendingDelete> actions) async {
+    for (final a in actions) {
+      await a.note.delete();
+      _notes.remove(a.note);
+    }
     notifyListeners();
   }
 
-  Future<void> addNote(String text) async {
+  Future<NoteFile> addNote(String text) async {
     final folder = folderPath;
-    if (folder == null) return;
+    if (folder == null) {
+      throw StateError('addNote called with no data folder set');
+    }
 
     final slug = _slugify(text);
     final suffix = _randomHex(6);
-    final filename = '${slug.isEmpty ? 'note' : slug}-$suffix.json';
+    final filename = '${slug.isEmpty ? 'note' : slug}-$suffix.txt';
     final file = File(p.join(folder, filename));
+    await file.writeAsString(text);
 
-    final data = <String, dynamic>{'body': text};
-    await file.writeAsString(jsonEncode(data));
-
-    _notes.add(NoteFile(file: file, data: data));
+    final note = NoteFile(file: file, body: text);
+    _notes.add(note);
     notifyListeners();
+    return note;
   }
 
   String _slugify(String input) {

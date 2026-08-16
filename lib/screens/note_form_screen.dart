@@ -1,18 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../models/note.dart';
 import '../repository/note_repository.dart';
 
-class AddScreen extends StatefulWidget {
-  const AddScreen({super.key, required this.repository});
+/// Add/edit form for a single note. When [note] is null this is the "Add"
+/// tab: saving writes a new file and clears the field so another note can
+/// be added right away. When [note] is set, saving overwrites that note's
+/// body and pops back to whichever screen jumped here.
+class NoteFormScreen extends StatefulWidget {
+  const NoteFormScreen({super.key, required this.repository, this.note});
 
   final NoteRepository repository;
+  final NoteFile? note;
 
   @override
-  State<AddScreen> createState() => _AddScreenState();
+  State<NoteFormScreen> createState() => _NoteFormScreenState();
 }
 
-class _AddScreenState extends State<AddScreen> {
-  final _controller = TextEditingController();
+class _NoteFormScreenState extends State<NoteFormScreen> {
+  late final _controller = TextEditingController(text: widget.note?.body ?? '');
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -24,13 +31,28 @@ class _AddScreenState extends State<AddScreen> {
     setState(_controller.clear);
   }
 
-  Future<void> _add() async {
-    final text = _controller.text.trim();
+  Future<void> _save() async {
+    final text = collapseNewlines(_controller.text);
     if (text.isEmpty) return;
-    await widget.repository.addNote(text);
-    _controller.clear();
+
+    setState(() => _saving = true);
+    final note = widget.note;
+    if (note != null) {
+      await note.setBody(text);
+    } else {
+      await widget.repository.addNote(text);
+    }
     if (!mounted) return;
-    setState(() {});
+
+    if (note != null) {
+      Navigator.pop(context);
+      return;
+    }
+
+    setState(() {
+      _saving = false;
+      _controller.clear();
+    });
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('Note saved')));
@@ -38,6 +60,7 @@ class _AddScreenState extends State<AddScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isEdit = widget.note != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
@@ -45,7 +68,7 @@ class _AddScreenState extends State<AddScreen> {
           Expanded(
             child: TextField(
               controller: _controller,
-              autofocus: false,
+              autofocus: isEdit,
               maxLines: null,
               expands: true,
               textAlignVertical: TextAlignVertical.top,
@@ -61,21 +84,23 @@ class _AddScreenState extends State<AddScreen> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _clear,
+                  onPressed: _saving
+                      ? null
+                      : (isEdit ? () => Navigator.pop(context) : _clear),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: const Text('Clear'),
+                  child: Text(isEdit ? 'Cancel' : 'Clear'),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: _add,
+                  onPressed: _saving ? null : _save,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: const Text('Add'),
+                  child: Text(isEdit ? 'Save' : 'Add'),
                 ),
               ),
             ],
