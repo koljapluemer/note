@@ -7,8 +7,8 @@ A minimal Flutter app for triaging a folder of plain-text notes stored as `.txt`
 - [Flutter SDK](https://docs.flutter.dev/install) (stable channel)
 - Android SDK + NDK (via `flutter doctor` / Android Studio) for the Android target
 - Linux desktop build tools:
-  - Ubuntu: `sudo apt install cmake ninja-build clang libgtk-3-dev`
-  - Fedora: `sudo dnf install cmake ninja-build clang gtk3-devel`
+  - Ubuntu: `sudo apt install cmake ninja-build clang libgtk-3-dev imagemagick`
+  - Fedora: `sudo dnf install cmake ninja-build clang gtk3-devel ImageMagick`
 - [`just`](https://github.com/casey/just) (optional) — see `justfile` for the dev/build/install shortcuts used below
 
 ## Setup
@@ -41,6 +41,19 @@ flutter build linux         # equivalent, manual
 ```
 
 Install a built APK: `adb install -r build/app/outputs/flutter-apk/app-debug.apk`
+
+## Icon
+
+`icons/icon.png` is the single 512×512 source (attribution in `icons/about.txt`). Android's `mipmap-*/ic_launcher.png` files are pre-generated from it and committed — regenerate them after changing the source with:
+
+```bash
+for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+  density=${density_size%%:*}; size=${density_size##*:}
+  convert icons/icon.png -resize "${size}x${size}" "android/app/src/main/res/mipmap-$density/ic_launcher.png"
+done
+```
+
+For Linux, `just reinstall` generates the hicolor icon theme set from `icons/icon.png` at install time and points the desktop entry's `Icon=` at it — nothing to regenerate by hand there.
 
 ## Analysis
 
