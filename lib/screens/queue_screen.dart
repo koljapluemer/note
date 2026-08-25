@@ -18,6 +18,8 @@ class QueueScreen extends StatefulWidget {
 class _QueueScreenState extends State<QueueScreen> {
   static const _batchSize = 3;
 
+  final _filterController = TextEditingController();
+
   List<NoteFile> _current = [];
   int? _pendingDeleteId;
 
@@ -26,12 +28,23 @@ class _QueueScreenState extends State<QueueScreen> {
     super.initState();
     _current = widget.repository.randomNotes(_batchSize);
     widget.repository.addListener(_onRepositoryChanged);
+    _filterController.addListener(_onFilterChanged);
   }
 
   @override
   void dispose() {
     widget.repository.removeListener(_onRepositoryChanged);
+    _filterController.dispose();
     super.dispose();
+  }
+
+  void _onFilterChanged() {
+    setState(
+      () => _current = widget.repository.randomNotes(
+        _batchSize,
+        query: _filterController.text,
+      ),
+    );
   }
 
   void _onRepositoryChanged() {
@@ -43,7 +56,12 @@ class _QueueScreenState extends State<QueueScreen> {
   }
 
   void _next() {
-    setState(() => _current = widget.repository.randomNotes(_batchSize));
+    setState(
+      () => _current = widget.repository.randomNotes(
+        _batchSize,
+        query: _filterController.text,
+      ),
+    );
   }
 
   Future<void> _edit(NoteFile note) async {
@@ -95,7 +113,25 @@ class _QueueScreenState extends State<QueueScreen> {
                   ),
           ),
           const SizedBox(height: 12),
-          FilledButton(onPressed: _next, child: const Text('Next')),
+          Row(
+            children: [
+              Expanded(
+                flex: 1,
+                child: TextField(
+                  controller: _filterController,
+                  decoration: const InputDecoration(isDense: true),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: _next,
+                  child: const Text('Next'),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
         ],
       ),

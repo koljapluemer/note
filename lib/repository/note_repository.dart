@@ -99,9 +99,14 @@ class NoteRepository extends ChangeNotifier {
     return available[_random.nextInt(available.length)];
   }
 
-  /// Up to [count] distinct random notes (fewer if not enough are available).
-  List<NoteFile> randomNotes(int count) {
-    final available = List<NoteFile>.from(_available)..shuffle(_random);
+  /// Up to [count] distinct random notes (fewer if not enough are available),
+  /// optionally restricted to notes whose body contains [query].
+  List<NoteFile> randomNotes(int count, {String query = ''}) {
+    final q = query.trim().toLowerCase();
+    final available = _available
+        .where((n) => q.isEmpty || n.body.toLowerCase().contains(q))
+        .toList()
+      ..shuffle(_random);
     return available.take(count).toList();
   }
 
