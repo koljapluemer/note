@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/note.dart';
 import '../repository/note_repository.dart';
+import '../widgets/delete_note_notification.dart';
 import 'note_form_screen.dart';
 
 /// Shows a batch of random notes with per-note edit/delete actions, and a
@@ -21,19 +22,16 @@ class _QueueScreenState extends State<QueueScreen> {
   final _filterController = TextEditingController();
 
   List<NoteFile> _current = [];
-  int? _pendingDeleteId;
 
   @override
   void initState() {
     super.initState();
     _current = widget.repository.randomNotes(_batchSize);
-    widget.repository.addListener(_onRepositoryChanged);
     _filterController.addListener(_onFilterChanged);
   }
 
   @override
   void dispose() {
-    widget.repository.removeListener(_onRepositoryChanged);
     _filterController.dispose();
     super.dispose();
   }
@@ -45,14 +43,6 @@ class _QueueScreenState extends State<QueueScreen> {
         query: _filterController.text,
       ),
     );
-  }
-
-  void _onRepositoryChanged() {
-    final id = _pendingDeleteId;
-    if (id != null && !widget.repository.isPendingActive(id)) {
-      _pendingDeleteId = null;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    }
   }
 
   void _next() {
@@ -82,16 +72,10 @@ class _QueueScreenState extends State<QueueScreen> {
     final id = widget.repository.beginPendingDeleteNote(note);
     setState(() => _current = _current.where((n) => n != note).toList());
 
-    _pendingDeleteId = id;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Note deleted'),
-        duration: const Duration(days: 1),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () => widget.repository.cancelPending(id),
-        ),
-      ),
+    DeleteNoteNotification(
+      context: context,
+      repository: widget.repository,
+      pendingId: id,
     );
   }
 

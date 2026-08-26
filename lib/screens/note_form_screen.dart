@@ -53,9 +53,6 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       _saving = false;
       _controller.clear();
     });
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Note saved')));
   }
 
   @override

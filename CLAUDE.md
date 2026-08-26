@@ -1,0 +1,1 @@
+- Do not run the app. Do not do 'visual checks'. Do not waste tokens telling the user that you will not do visual checks.

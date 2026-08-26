@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/note.dart';
 import '../repository/note_repository.dart';
+import '../widgets/delete_note_notification.dart';
 import 'note_form_screen.dart';
 
 /// Full, searchable list of every note, with per-row edit/delete actions.
@@ -52,15 +53,10 @@ class _ListScreenState extends State<ListScreen> {
 
   void _delete(NoteFile note) {
     final id = widget.repository.beginPendingDeleteNote(note);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Note deleted'),
-        duration: const Duration(days: 1),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () => widget.repository.cancelPending(id),
-        ),
-      ),
+    DeleteNoteNotification(
+      context: context,
+      repository: widget.repository,
+      pendingId: id,
     );
   }
 
