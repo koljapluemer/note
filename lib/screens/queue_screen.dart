@@ -105,7 +105,6 @@ class _QueueScreenState extends State<QueueScreen> {
           Row(
             children: [
               Expanded(
-                flex: 1,
                 child: TextField(
                   controller: _filterController,
                   focusNode: _filterFocus,
@@ -115,11 +114,12 @@ class _QueueScreenState extends State<QueueScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: FilledButton(
-                  onPressed: _next,
-                  child: const Text('Next'),
+              IconButton.filled(
+                onPressed: _next,
+                tooltip: 'Next',
+                icon: const Icon(Icons.refresh),
+                style: IconButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
                 ),
               ),
             ],

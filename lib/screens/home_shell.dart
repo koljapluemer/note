@@ -28,17 +28,26 @@ class _HomeShellState extends State<HomeShell> {
     ];
     return Scaffold(
       body: SafeArea(
-        child: IndexedStack(index: _index, children: pages),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.add), label: 'Add'),
-          NavigationDestination(icon: Icon(Icons.layers), label: 'Queue'),
-          NavigationDestination(icon: Icon(Icons.list), label: 'List'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
-        ],
+        child: Column(
+          children: [
+            NavigationBar(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.add), label: 'Add'),
+                NavigationDestination(icon: Icon(Icons.layers), label: 'Queue'),
+                NavigationDestination(icon: Icon(Icons.list), label: 'List'),
+                NavigationDestination(
+                  icon: Icon(Icons.settings),
+                  label: 'Settings',
+                ),
+              ],
+            ),
+            Expanded(
+              child: IndexedStack(index: _index, children: pages),
+            ),
+          ],
+        ),
       ),
     );
   }

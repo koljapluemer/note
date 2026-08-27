@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/note.dart';
@@ -22,10 +24,35 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   late String _extraContent = widget.note?.extraContent ?? '';
   bool _saving = false;
 
+  /// Held-down timer for the clear/cancel button — it must be pressed for
+  /// [_resetHoldDuration] before it fires, so a stray tap can't wipe the form.
+  static const _resetHoldDuration = Duration(milliseconds: 300);
+  Timer? _resetHoldTimer;
+
   @override
   void dispose() {
+    _resetHoldTimer?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _startResetHold() {
+    if (_saving) return;
+    _resetHoldTimer?.cancel();
+    _resetHoldTimer = Timer(_resetHoldDuration, () {
+      _resetHoldTimer = null;
+      if (!mounted || _saving) return;
+      if (widget.note != null) {
+        Navigator.pop(context);
+      } else {
+        _clear();
+      }
+    });
+  }
+
+  void _cancelResetHold() {
+    _resetHoldTimer?.cancel();
+    _resetHoldTimer = null;
   }
 
   void _clear() {
@@ -119,37 +146,38 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _saving
-                      ? null
-                      : (isEdit ? () => Navigator.pop(context) : _clear),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+              Listener(
+                onPointerDown: (_) => _startResetHold(),
+                onPointerUp: (_) => _cancelResetHold(),
+                onPointerCancel: (_) => _cancelResetHold(),
+                child: IconButton.outlined(
+                  // The hold timer does the work; this keeps the button
+                  // enabled-looking and gives tap feedback.
+                  onPressed: _saving ? null : () {},
+                  tooltip: isEdit ? 'Hold to cancel' : 'Hold to clear',
+                  icon: Icon(isEdit ? Icons.close : Icons.backspace_outlined),
+                  style: IconButton.styleFrom(
+                    padding: const EdgeInsets.all(16),
                   ),
-                  child: Text(isEdit ? 'Cancel' : 'Clear'),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _saving ? null : _save,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  child: Text(isEdit ? 'Save' : 'Add'),
-                ),
-              ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               IconButton.outlined(
                 onPressed: _saving ? null : _editExtraContent,
                 tooltip: 'Extra content',
                 isSelected: _extraContent.isNotEmpty,
                 icon: Icon(
-                  _extraContent.isEmpty
-                      ? Icons.notes_outlined
-                      : Icons.notes,
+                  _extraContent.isEmpty ? Icons.notes_outlined : Icons.notes,
                 ),
+                style: IconButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                ),
+              ),
+              const Spacer(),
+              IconButton.filled(
+                onPressed: _saving ? null : _save,
+                tooltip: isEdit ? 'Save' : 'Add',
+                icon: Icon(isEdit ? Icons.check : Icons.add),
                 style: IconButton.styleFrom(
                   padding: const EdgeInsets.all(16),
                 ),
