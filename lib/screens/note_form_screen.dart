@@ -19,6 +19,7 @@ class NoteFormScreen extends StatefulWidget {
 
 class _NoteFormScreenState extends State<NoteFormScreen> {
   late final _controller = TextEditingController(text: widget.note?.body ?? '');
+  late String _extraContent = widget.note?.extraContent ?? '';
   bool _saving = false;
 
   @override
@@ -28,7 +29,43 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   }
 
   void _clear() {
-    setState(_controller.clear);
+    setState(() {
+      _controller.clear();
+      _extraContent = '';
+    });
+  }
+
+  Future<void> _editExtraContent() async {
+    final controller = TextEditingController(text: _extraContent);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Extra content'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: null,
+          minLines: 6,
+          textAlignVertical: TextAlignVertical.top,
+          decoration: const InputDecoration(
+            hintText: 'Extra content…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null) setState(() => _extraContent = result.trim());
   }
 
   Future<void> _save() async {
@@ -39,8 +76,10 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     final note = widget.note;
     if (note != null) {
       await note.setBody(text);
+      await note.setExtraContent(_extraContent);
     } else {
-      await widget.repository.addNote(text);
+      final created = await widget.repository.addNote(text);
+      if (_extraContent.isNotEmpty) await created.setExtraContent(_extraContent);
     }
     if (!mounted) return;
 
@@ -52,6 +91,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     setState(() {
       _saving = false;
       _controller.clear();
+      _extraContent = '';
     });
   }
 
@@ -98,6 +138,20 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: Text(isEdit ? 'Save' : 'Add'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              IconButton.outlined(
+                onPressed: _saving ? null : _editExtraContent,
+                tooltip: 'Extra content',
+                isSelected: _extraContent.isNotEmpty,
+                icon: Icon(
+                  _extraContent.isEmpty
+                      ? Icons.notes_outlined
+                      : Icons.notes,
+                ),
+                style: IconButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
                 ),
               ),
             ],

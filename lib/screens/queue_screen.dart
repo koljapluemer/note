@@ -20,6 +20,7 @@ class _QueueScreenState extends State<QueueScreen> {
   static const _batchSize = 3;
 
   final _filterController = TextEditingController();
+  final _filterFocus = FocusNode();
 
   List<NoteFile> _current = [];
 
@@ -27,12 +28,16 @@ class _QueueScreenState extends State<QueueScreen> {
   void initState() {
     super.initState();
     _current = widget.repository.randomNotes(_batchSize);
-    _filterController.addListener(_onFilterChanged);
+    // Filter on blur/submit rather than on every keystroke.
+    _filterFocus.addListener(() {
+      if (!_filterFocus.hasFocus) _onFilterChanged();
+    });
   }
 
   @override
   void dispose() {
     _filterController.dispose();
+    _filterFocus.dispose();
     super.dispose();
   }
 
@@ -103,6 +108,9 @@ class _QueueScreenState extends State<QueueScreen> {
                 flex: 1,
                 child: TextField(
                   controller: _filterController,
+                  focusNode: _filterFocus,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _onFilterChanged(),
                   decoration: const InputDecoration(isDense: true),
                 ),
               ),

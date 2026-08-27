@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/note.dart';
@@ -17,14 +19,20 @@ class ListScreen extends StatefulWidget {
 
 class _ListScreenState extends State<ListScreen> {
   final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
   String _query = '';
+
+  /// Reseeded whenever [_query] changes so the random order of main-content
+  /// matches stays stable across unrelated rebuilds (deletes, etc.).
+  int _shuffleSeed = 0;
 
   @override
   void initState() {
     super.initState();
     widget.repository.addListener(_onRepositoryChanged);
-    _searchController.addListener(() {
-      setState(() => _query = _searchController.text.trim().toLowerCase());
+    // Filter on blur/submit rather than on every keystroke.
+    _searchFocus.addListener(() {
+      if (!_searchFocus.hasFocus) _applyFilter();
     });
   }
 
@@ -32,7 +40,17 @@ class _ListScreenState extends State<ListScreen> {
   void dispose() {
     widget.repository.removeListener(_onRepositoryChanged);
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _applyFilter() {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query == _query) return;
+    setState(() {
+      _query = query;
+      _shuffleSeed = DateTime.now().microsecondsSinceEpoch;
+    });
   }
 
   void _onRepositoryChanged() => setState(() {});
@@ -60,12 +78,30 @@ class _ListScreenState extends State<ListScreen> {
     );
   }
 
+  /// All non-pending notes matching [_query]. With a query, notes matched in
+  /// the main content come first (in a per-query random order), followed by
+  /// notes matched only in the extra content.
+  List<NoteFile> _visibleNotes() {
+    final visible = widget.repository.notes
+        .where((n) => !widget.repository.isPendingDeleteNote(n));
+    if (_query.isEmpty) return visible.toList();
+
+    final inBody = <NoteFile>[];
+    final inExtraOnly = <NoteFile>[];
+    for (final note in visible) {
+      if (note.body.toLowerCase().contains(_query)) {
+        inBody.add(note);
+      } else if (note.extraContent.toLowerCase().contains(_query)) {
+        inExtraOnly.add(note);
+      }
+    }
+    inBody.shuffle(Random(_shuffleSeed));
+    return [...inBody, ...inExtraOnly];
+  }
+
   @override
   Widget build(BuildContext context) {
-    final notes = widget.repository.notes
-        .where((n) => !widget.repository.isPendingDeleteNote(n))
-        .where((n) => _query.isEmpty || n.body.toLowerCase().contains(_query))
-        .toList();
+    final notes = _visibleNotes();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -74,6 +110,9 @@ class _ListScreenState extends State<ListScreen> {
         children: [
           TextField(
             controller: _searchController,
+            focusNode: _searchFocus,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _applyFilter(),
             decoration: const InputDecoration(
               hintText: 'Filter notes…',
               prefixIcon: Icon(Icons.search),

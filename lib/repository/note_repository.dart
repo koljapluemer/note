@@ -19,8 +19,15 @@ List<Map<String, String>> parseFolderIsolate(String folderPath) {
     if (entity is! File || !entity.path.toLowerCase().endsWith('.txt')) {
       continue;
     }
+    // `.extra.txt` sidecars are read alongside their note, not as notes.
+    if (entity.path.toLowerCase().endsWith('.extra.txt')) continue;
     try {
-      results.add({'path': entity.path, 'body': entity.readAsStringSync()});
+      final extraFile = File(NoteFile.extraPathFor(entity.path));
+      results.add({
+        'path': entity.path,
+        'body': entity.readAsStringSync(),
+        'extra': extraFile.existsSync() ? extraFile.readAsStringSync() : '',
+      });
     } catch (_) {
       // Skip unreadable files.
     }
@@ -79,7 +86,11 @@ class NoteRepository extends ChangeNotifier {
       final parsed = await compute(parseFolderIsolate, folderPath!);
       _notes = [
         for (final entry in parsed)
-          NoteFile(file: File(entry['path']!), body: entry['body']!),
+          NoteFile(
+            file: File(entry['path']!),
+            body: entry['body']!,
+            extraContent: entry['extra'] ?? '',
+          ),
       ];
     } catch (e) {
       loadError = e.toString();
@@ -100,11 +111,17 @@ class NoteRepository extends ChangeNotifier {
   }
 
   /// Up to [count] distinct random notes (fewer if not enough are available),
-  /// optionally restricted to notes whose body contains [query].
+  /// optionally restricted to notes whose body or extra content contains
+  /// [query].
   List<NoteFile> randomNotes(int count, {String query = ''}) {
     final q = query.trim().toLowerCase();
     final available = _available
-        .where((n) => q.isEmpty || n.body.toLowerCase().contains(q))
+        .where(
+          (n) =>
+              q.isEmpty ||
+              n.body.toLowerCase().contains(q) ||
+              n.extraContent.toLowerCase().contains(q),
+        )
         .toList()
       ..shuffle(_random);
     return available.take(count).toList();
