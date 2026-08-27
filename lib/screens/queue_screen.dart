@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../repository/note_repository.dart';
 import '../widgets/delete_note_notification.dart';
+import '../widgets/image_viewer.dart';
 import 'note_form_screen.dart';
 
 /// Shows a batch of random notes with per-note edit/delete actions, and a
@@ -131,25 +132,56 @@ class _QueueScreenState extends State<QueueScreen> {
   }
 
   Widget _buildNoteRow(NoteFile note) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // An image-only note skips the "(empty note)" placeholder — the image
+    // itself is the content.
+    final showText = note.body.isNotEmpty || !note.hasImage;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(note.body.isEmpty ? '(empty note)' : note.body),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: showText
+                    ? Text(note.body.isEmpty ? '(empty note)' : note.body)
+                    : const SizedBox.shrink(),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit',
+              onPressed: () => _edit(note),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete',
+              onPressed: () => _delete(note),
+            ),
+          ],
+        ),
+        if (note.hasImage)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height / 3,
+              ),
+              child: GestureDetector(
+                onTap: () =>
+                    showImageViewer(context, FileImage(note.imageFile!)),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    note.imageFile!,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        IconButton(
-          icon: const Icon(Icons.edit_outlined),
-          tooltip: 'Edit',
-          onPressed: () => _edit(note),
-        ),
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          tooltip: 'Delete',
-          onPressed: () => _delete(note),
-        ),
       ],
     );
   }

@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../models/note.dart';
 import '../repository/note_repository.dart';
+import '../widgets/image_viewer.dart';
 
 /// Add/edit form for a single note. When [note] is null this is the "Add"
 /// tab: saving writes a new file and clears the field so another note can
@@ -22,12 +26,33 @@ class NoteFormScreen extends StatefulWidget {
 class _NoteFormScreenState extends State<NoteFormScreen> {
   late final _controller = TextEditingController(text: widget.note?.body ?? '');
   late String _extraContent = widget.note?.extraContent ?? '';
+
+  /// The note's already-saved image, if any.
+  late String? _imagePath = widget.note?.imagePath;
+
+  /// A freshly picked image that hasn't been written to disk yet.
+  String? _pickedImagePath;
+
+  /// Set when the user removes an existing image; applied on save.
+  bool _imageRemoved = false;
+
   bool _saving = false;
 
   /// Held-down timer for the clear/cancel button — it must be pressed for
   /// [_resetHoldDuration] before it fires, so a stray tap can't wipe the form.
   static const _resetHoldDuration = Duration(milliseconds: 300);
   Timer? _resetHoldTimer;
+
+  bool get _hasImage =>
+      _pickedImagePath != null || (_imagePath != null && !_imageRemoved);
+
+  ImageProvider? get _imageProvider {
+    final picked = _pickedImagePath;
+    if (picked != null) return FileImage(File(picked));
+    final saved = _imagePath;
+    if (saved != null && !_imageRemoved) return FileImage(File(saved));
+    return null;
+  }
 
   @override
   void dispose() {
@@ -59,6 +84,8 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     setState(() {
       _controller.clear();
       _extraContent = '';
+      _pickedImagePath = null;
+      _imageRemoved = true;
     });
   }
 
@@ -95,19 +122,108 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     if (result != null) setState(() => _extraContent = result.trim());
   }
 
+  /// Tapping the image button: with no image, jump straight to the picker;
+  /// with one, offer view / replace / remove.
+  Future<void> _manageImage() async {
+    if (!_hasImage) {
+      await _pickImage();
+      return;
+    }
+    final provider = _imageProvider!;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Image'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 320),
+          child: Image(image: provider, fit: BoxFit.contain),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'view'),
+            child: const Text('View'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'replace'),
+            child: const Text('Replace'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'remove'),
+            child: const Text('Remove'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'close'),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'view':
+        await showImageViewer(context, provider);
+      case 'replace':
+        await _pickImage();
+      case 'remove':
+        setState(() {
+          _pickedImagePath = null;
+          _imageRemoved = true;
+        });
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (!mounted) return;
+    final path = result?.files.single.path;
+    if (path == null) return;
+    final ext = p.extension(path).toLowerCase();
+    if (!supportedImageExtensions.contains(ext)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unsupported image type')),
+      );
+      return;
+    }
+    final length = await File(path).length();
+    if (!mounted) return;
+    if (length > maxImageBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Image is too large')),
+      );
+      return;
+    }
+    setState(() {
+      _pickedImagePath = path;
+      _imageRemoved = false;
+    });
+  }
+
+  Future<void> _applyImage(NoteFile note) async {
+    final picked = _pickedImagePath;
+    if (picked != null) {
+      final bytes = await File(picked).readAsBytes();
+      await note.setImage(bytes, p.extension(picked).toLowerCase());
+    } else if (_imageRemoved && note.hasImage) {
+      await note.clearImage();
+    }
+  }
+
   Future<void> _save() async {
     final text = collapseNewlines(_controller.text);
-    if (text.isEmpty) return;
+    if (text.isEmpty && !_hasImage) return;
 
     setState(() => _saving = true);
     final note = widget.note;
+    final NoteFile target;
     if (note != null) {
       await note.setBody(text);
       await note.setExtraContent(_extraContent);
+      target = note;
     } else {
-      final created = await widget.repository.addNote(text);
-      if (_extraContent.isNotEmpty) await created.setExtraContent(_extraContent);
+      target = await widget.repository.addNote(text);
+      if (_extraContent.isNotEmpty) await target.setExtraContent(_extraContent);
     }
+    await _applyImage(target);
     if (!mounted) return;
 
     if (note != null) {
@@ -119,12 +235,16 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       _saving = false;
       _controller.clear();
       _extraContent = '';
+      _pickedImagePath = null;
+      _imageRemoved = false;
+      _imagePath = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.note != null;
+    final imageProvider = _imageProvider;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
@@ -169,6 +289,25 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
                 icon: Icon(
                   _extraContent.isEmpty ? Icons.notes_outlined : Icons.notes,
                 ),
+                style: IconButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                onPressed: _saving ? null : _manageImage,
+                tooltip: 'Image',
+                isSelected: _hasImage,
+                icon: imageProvider == null
+                    ? const Icon(Icons.image_outlined)
+                    : SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Image(image: imageProvider, fit: BoxFit.cover),
+                        ),
+                      ),
                 style: IconButton.styleFrom(
                   padding: const EdgeInsets.all(16),
                 ),

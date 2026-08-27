@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../repository/note_repository.dart';
 import '../widgets/delete_note_notification.dart';
+import '../widgets/image_viewer.dart';
 import 'note_form_screen.dart';
 
 /// Full, searchable list of every note, with per-row edit/delete actions.
@@ -130,7 +131,27 @@ class _ListScreenState extends State<ListScreen> {
                     itemBuilder: (context, index) {
                       final note = notes[index];
                       return ListTile(
-                        title: Text(note.preview),
+                        leading: note.hasImage
+                            ? GestureDetector(
+                                onTap: () => showImageViewer(
+                                  context,
+                                  FileImage(note.imageFile!),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Image.file(
+                                    note.imageFile!,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 96,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        title: note.body.trim().isEmpty && note.hasImage
+                            ? null
+                            : Text(note.preview),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

@@ -15,6 +15,30 @@ List<Map<String, String>> parseFolderIsolate(String folderPath) {
   final dir = Directory(folderPath);
   final results = <Map<String, String>>[];
   if (!dir.existsSync()) return results;
+
+  // Index `images/` once: note-stem -> newest matching image path. Filenames
+  // are `<stem>-<timestamp><ext>`, so the highest timestamp is the live one.
+  final imageByStem = <String, String>{};
+  final imageTsByStem = <String, int>{};
+  final imagesDir = Directory(p.join(folderPath, 'images'));
+  if (imagesDir.existsSync()) {
+    final namePattern = RegExp(r'^(.+)-(\d+)$');
+    for (final entity in imagesDir.listSync()) {
+      if (entity is! File) continue;
+      final ext = p.extension(entity.path).toLowerCase();
+      if (!supportedImageExtensions.contains(ext)) continue;
+      final match =
+          namePattern.firstMatch(p.basenameWithoutExtension(entity.path));
+      if (match == null) continue;
+      final stem = match.group(1)!;
+      final ts = int.tryParse(match.group(2)!) ?? 0;
+      if (ts >= (imageTsByStem[stem] ?? -1)) {
+        imageTsByStem[stem] = ts;
+        imageByStem[stem] = entity.path;
+      }
+    }
+  }
+
   for (final entity in dir.listSync()) {
     if (entity is! File || !entity.path.toLowerCase().endsWith('.txt')) {
       continue;
@@ -27,6 +51,7 @@ List<Map<String, String>> parseFolderIsolate(String folderPath) {
         'path': entity.path,
         'body': entity.readAsStringSync(),
         'extra': extraFile.existsSync() ? extraFile.readAsStringSync() : '',
+        'image': imageByStem[p.basenameWithoutExtension(entity.path)] ?? '',
       });
     } catch (_) {
       // Skip unreadable files.
@@ -90,6 +115,7 @@ class NoteRepository extends ChangeNotifier {
             file: File(entry['path']!),
             body: entry['body']!,
             extraContent: entry['extra'] ?? '',
+            imagePath: (entry['image'] ?? '').isEmpty ? null : entry['image'],
           ),
       ];
     } catch (e) {
