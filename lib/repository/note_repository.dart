@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -9,11 +10,18 @@ import '../models/note.dart';
 
 const _prefsFolderKey = 'data_folder';
 
-/// Reads every .txt file in [folderPath]. Runs in a background isolate via
-/// [compute] so scanning thousands of files never blocks the UI thread.
-List<Map<String, String>> parseFolderIsolate(String folderPath) {
+/// Reads and JSON-decodes every `*.json` note file in [folderPath]. Runs in a
+/// background isolate via [compute] so scanning thousands of files never blocks
+/// the UI thread. Files that don't parse to a JSON object are skipped, never
+/// fatal.
+///
+/// Each entry has three keys: `path` (the file's path), `image` (its resolved
+/// image path, or an empty string) and `note` (the decoded JSON object). All
+/// values are plain maps/lists/strings so the result crosses the isolate
+/// boundary cleanly.
+List<Map<String, dynamic>> parseFolderIsolate(String folderPath) {
   final dir = Directory(folderPath);
-  final results = <Map<String, String>>[];
+  final results = <Map<String, dynamic>>[];
   if (!dir.existsSync()) return results;
 
   // Index `images/` once: note-stem -> newest matching image path. Filenames
@@ -40,21 +48,19 @@ List<Map<String, String>> parseFolderIsolate(String folderPath) {
   }
 
   for (final entity in dir.listSync()) {
-    if (entity is! File || !entity.path.toLowerCase().endsWith('.txt')) {
+    if (entity is! File || !entity.path.toLowerCase().endsWith('.json')) {
       continue;
     }
-    // `.extra.txt` sidecars are read alongside their note, not as notes.
-    if (entity.path.toLowerCase().endsWith('.extra.txt')) continue;
     try {
-      final extraFile = File(NoteFile.extraPathFor(entity.path));
+      final decoded = jsonDecode(entity.readAsStringSync());
+      if (decoded is! Map) continue; // not a note object — skip, don't fail
       results.add({
         'path': entity.path,
-        'body': entity.readAsStringSync(),
-        'extra': extraFile.existsSync() ? extraFile.readAsStringSync() : '',
         'image': imageByStem[p.basenameWithoutExtension(entity.path)] ?? '',
+        'note': Map<String, dynamic>.from(decoded),
       });
     } catch (_) {
-      // Skip unreadable files.
+      // Skip unreadable / unparseable files.
     }
   }
   return results;
@@ -111,11 +117,12 @@ class NoteRepository extends ChangeNotifier {
       final parsed = await compute(parseFolderIsolate, folderPath!);
       _notes = [
         for (final entry in parsed)
-          NoteFile(
-            file: File(entry['path']!),
-            body: entry['body']!,
-            extraContent: entry['extra'] ?? '',
-            imagePath: (entry['image'] ?? '').isEmpty ? null : entry['image'],
+          NoteFile.fromJson(
+            File(entry['path'] as String),
+            Map<String, dynamic>.from(entry['note'] as Map),
+            imagePath: (entry['image'] as String).isEmpty
+                ? null
+                : entry['image'] as String,
           ),
       ];
     } catch (e) {
@@ -209,11 +216,11 @@ class NoteRepository extends ChangeNotifier {
 
     final slug = _slugify(text);
     final suffix = _randomHex(6);
-    final filename = '${slug.isEmpty ? 'note' : slug}-$suffix.txt';
+    final filename = '${slug.isEmpty ? 'note' : slug}-$suffix.json';
     final file = File(p.join(folder, filename));
-    await file.writeAsString(text);
 
     final note = NoteFile(file: file, body: text);
+    await note.save();
     _notes.add(note);
     notifyListeners();
     return note;

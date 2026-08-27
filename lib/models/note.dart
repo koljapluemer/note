@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -24,31 +25,82 @@ const Set<String> supportedImageExtensions = {
   '.bmp',
 };
 
-/// A single plain-text note backed by a `.txt` file on disk.
+/// A single note persisted as one `<name>.json` file directly inside the data
+/// folder.
 ///
-/// Optional longer-form [extraContent] lives in a sibling `<name>.extra.txt`
-/// sidecar file, created only when there's something to store. An optional
-/// image lives in an `images/` subfolder as `<name>-<timestamp><ext>` — the
-/// timestamp makes every replacement a brand-new path, side-stepping Flutter's
-/// path-keyed image cache.
+/// The JSON object always carries `body` (the single line of note text) and,
+/// only when non-empty, `extra` (optional long-form content) and `rels` — an
+/// opaque string→string map this app never reads, renders, or validates. `rels`
+/// exists purely so external tooling can hang metadata off a note; any *other*
+/// unrecognised top-level keys are likewise kept and written back untouched, so
+/// nothing a third party adds is lost on the next edit.
+///
+/// An optional image still lives as a real file in the sibling `images/` folder
+/// as `<name>-<timestamp><ext>` (the timestamp makes every replacement a
+/// brand-new path, side-stepping Flutter's path-keyed image cache). It is found
+/// by name during the folder scan, not referenced from the JSON.
 class NoteFile {
   NoteFile({
     required this.file,
     required String body,
     String extraContent = '',
     String? imagePath,
+    Map<String, String>? rels,
+    Map<String, dynamic>? passthroughKeys,
   })  : _body = body,
         _extraContent = extraContent,
-        _imagePath = imagePath;
+        _imagePath = imagePath,
+        _rels = {...?rels},
+        _passthrough = {...?passthroughKeys};
+
+  /// Builds a note from the decoded JSON object of [file]. Missing or
+  /// wrong-typed fields degrade to empty rather than throwing: a note is never
+  /// "invalid", it just has less in it.
+  factory NoteFile.fromJson(
+    File file,
+    Map<String, dynamic> json, {
+    String? imagePath,
+  }) {
+    final rawRels = json['rels'];
+    final relsIsObject = rawRels is Map;
+    final rels = <String, String>{};
+    if (relsIsObject) {
+      rawRels.forEach((k, v) => rels['$k'] = v is String ? v : '$v');
+    }
+
+    // Keys we regenerate from our own fields on write. A malformed `rels`
+    // (present but not an object) is deliberately left out of this set so it
+    // falls through to [_passthrough] and round-trips untouched.
+    final owned = {'body', 'extra', if (relsIsObject) 'rels'};
+
+    return NoteFile(
+      file: file,
+      body: json['body'] is String ? json['body'] as String : '',
+      extraContent: json['extra'] is String ? json['extra'] as String : '',
+      imagePath: imagePath,
+      rels: rels,
+      passthroughKeys: {
+        for (final entry in json.entries)
+          if (!owned.contains(entry.key)) entry.key: entry.value,
+      },
+    );
+  }
 
   final File file;
   String _body;
   String _extraContent;
   String? _imagePath;
+  Map<String, String> _rels;
+  final Map<String, dynamic> _passthrough;
 
   String get body => _body;
 
   String get extraContent => _extraContent;
+
+  /// Opaque metadata attached by external tooling. Never rendered or validated
+  /// by this app — only round-tripped to disk. Returns an unmodifiable view;
+  /// use [setRels] to change it.
+  Map<String, String> get rels => Map.unmodifiable(_rels);
 
   /// Absolute path of the attached image, or null when the note has none.
   String? get imagePath => _imagePath;
@@ -60,19 +112,13 @@ class NoteFile {
 
   bool get hasImage => _imagePath != null;
 
-  /// Path of the sidecar file holding [extraContent].
-  static String extraPathFor(String notePath) =>
-      '${notePath.substring(0, notePath.length - '.txt'.length)}.extra.txt';
-
-  File get _extraFile => File(extraPathFor(file.path));
-
   /// Folder that holds every note's image, alongside the notes folder.
   static String imagesDirFor(String notePath) =>
       p.join(p.dirname(notePath), 'images');
 
   String get _imagesDirPath => imagesDirFor(file.path);
 
-  /// The note's filename without its `.txt` extension — the prefix every one
+  /// The note's filename without its `.json` extension — the prefix every one
   /// of its image files shares.
   String get _imageStem => p.basenameWithoutExtension(file.path);
 
@@ -84,21 +130,42 @@ class NoteFile {
     return collapsed.length > 60 ? '${collapsed.substring(0, 60)}…' : collapsed;
   }
 
-  Future<void> setBody(String text) async {
-    _body = text;
-    await file.writeAsString(text);
+  /// The on-disk JSON object. Passthrough keys are emitted first so the fields
+  /// this app owns stay visually grouped at the end of a hand-inspected file;
+  /// `extra`/`rels` are omitted entirely when empty.
+  Map<String, dynamic> toJson() => {
+        ..._passthrough,
+        'body': _body,
+        if (_extraContent.isNotEmpty) 'extra': _extraContent,
+        if (_rels.isNotEmpty) 'rels': _rels,
+      };
+
+  static const JsonEncoder _encoder = JsonEncoder.withIndent('  ');
+
+  /// Serialises the note and writes it via a temp file + rename so a crash
+  /// mid-write can't leave a half-written note behind.
+  Future<void> save() async {
+    final tmp = File('${file.path}.tmp');
+    await tmp.writeAsString(_encoder.convert(toJson()));
+    await tmp.rename(file.path);
   }
 
-  /// Writes [text] to the sidecar file, or deletes the sidecar when [text] is
-  /// empty so notes without extra content leave no stray file behind.
+  Future<void> setBody(String text) async {
+    _body = text;
+    await save();
+  }
+
   Future<void> setExtraContent(String text) async {
     _extraContent = text;
-    final sidecar = _extraFile;
-    if (text.isEmpty) {
-      if (await sidecar.exists()) await sidecar.delete();
-    } else {
-      await sidecar.writeAsString(text);
-    }
+    await save();
+  }
+
+  /// Replaces the opaque [rels] map and persists it. The app never calls this
+  /// itself; it exists so `rels` is a real read/write property rather than a
+  /// write-only passenger.
+  Future<void> setRels(Map<String, String> value) async {
+    _rels = {...value};
+    await save();
   }
 
   /// Stores [bytes] as this note's image, replacing any current one.
@@ -123,8 +190,8 @@ class NoteFile {
 
   Future<void> delete() async {
     if (await file.exists()) await file.delete();
-    final sidecar = _extraFile;
-    if (await sidecar.exists()) await sidecar.delete();
+    final tmp = File('${file.path}.tmp');
+    if (await tmp.exists()) await tmp.delete();
     await _deleteImageFiles();
   }
 
