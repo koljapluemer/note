@@ -72,6 +72,9 @@ class _QueueScreenState extends State<QueueScreen> {
         ),
       ),
     );
+    // The edit mutates the same NoteFile instance in place, so the batch
+    // already holds the new content — rebuild so the row reflects it.
+    if (mounted) setState(() {});
   }
 
   void _delete(NoteFile note) {
