@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:pasteboard/pasteboard.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/note.dart';
@@ -122,11 +124,38 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
     if (result != null) setState(() => _extraContent = result.trim());
   }
 
-  /// Tapping the image button: with no image, jump straight to the picker;
-  /// with one, offer view / replace / remove.
+  /// Tapping the image button: with no image, offer choose-file / paste;
+  /// with one, offer view / replace / paste / remove.
   Future<void> _manageImage() async {
     if (!_hasImage) {
-      await _pickImage();
+      final action = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Image'),
+          content: const Text('Add an image to this note.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'paste'),
+              child: const Text('Paste'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, 'pick'),
+              child: const Text('Choose file'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      switch (action) {
+        case 'paste':
+          await _pasteImage();
+        case 'pick':
+          await _pickImage();
+      }
       return;
     }
     final provider = _imageProvider!;
@@ -148,6 +177,10 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
             child: const Text('Replace'),
           ),
           TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'paste'),
+            child: const Text('Paste'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(dialogContext, 'remove'),
             child: const Text('Remove'),
           ),
@@ -164,12 +197,57 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         await showImageViewer(context, provider);
       case 'replace':
         await _pickImage();
+      case 'paste':
+        await _pasteImage();
       case 'remove':
         setState(() {
           _pickedImagePath = null;
           _imageRemoved = true;
         });
     }
+  }
+
+  /// Pulls a bitmap off the system clipboard (PNG bytes) and stages it as the
+  /// picked image. Triggered from the image dialog's "Paste" button, so it
+  /// complains when the clipboard has no image.
+  Future<void> _pasteImage() async {
+    Uint8List? bytes;
+    try {
+      bytes = await Pasteboard.image;
+    } catch (_) {
+      bytes = null;
+    }
+    if (!mounted) return;
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No image on the clipboard')),
+      );
+      return;
+    }
+    await _stageImageBytes(bytes);
+  }
+
+  /// Writes clipboard bitmap [bytes] to a temp file and stages it as the
+  /// picked image, so it flows through the same path-based save logic as a
+  /// file-picked image.
+  Future<void> _stageImageBytes(Uint8List bytes) async {
+    if (!mounted) return;
+    if (bytes.length > maxImageBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Image is too large')),
+      );
+      return;
+    }
+    final dir = await Directory.systemTemp.createTemp('note_paste');
+    final file = File(
+      p.join(dir.path, 'clipboard-${DateTime.now().millisecondsSinceEpoch}.png'),
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    if (!mounted) return;
+    setState(() {
+      _pickedImagePath = file.path;
+      _imageRemoved = false;
+    });
   }
 
   Future<void> _pickImage() async {
@@ -250,16 +328,21 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       child: Column(
         children: [
           Expanded(
-            child: TextField(
-              controller: _controller,
-              autofocus: isEdit,
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              style: Theme.of(context).textTheme.bodyLarge,
-              decoration: const InputDecoration(
-                hintText: 'Write a note…',
-                border: InputBorder.none,
+            child: Actions(
+              actions: <Type, Action<Intent>>{
+                PasteTextIntent: _ClipboardImagePasteAction(this),
+              },
+              child: TextField(
+                controller: _controller,
+                autofocus: isEdit,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                style: Theme.of(context).textTheme.bodyLarge,
+                decoration: const InputDecoration(
+                  hintText: 'Write a note…',
+                  border: InputBorder.none,
+                ),
               ),
             ),
           ),
@@ -326,5 +409,37 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
         ],
       ),
     );
+  }
+}
+
+/// Intercepts Ctrl/Cmd-V inside the note field: if the system clipboard holds
+/// a bitmap, stage it as the note's image instead of pasting text. When the
+/// clipboard has no image, defer to Flutter's normal text paste.
+class _ClipboardImagePasteAction extends Action<PasteTextIntent> {
+  _ClipboardImagePasteAction(this._state);
+
+  final _NoteFormScreenState _state;
+
+  @override
+  Object? invoke(PasteTextIntent intent) {
+    _handle(intent, callingAction);
+    return null;
+  }
+
+  Future<void> _handle(
+    PasteTextIntent intent,
+    Action<PasteTextIntent>? fallback,
+  ) async {
+    Uint8List? bytes;
+    try {
+      bytes = await Pasteboard.image;
+    } catch (_) {
+      bytes = null;
+    }
+    if (bytes != null) {
+      await _state._stageImageBytes(bytes);
+      return;
+    }
+    fallback?.invoke(intent);
   }
 }
