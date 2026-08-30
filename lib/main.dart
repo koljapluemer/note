@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -46,6 +47,10 @@ class _NoteAppState extends State<NoteApp> {
     await _repository.init();
     if (!mounted) return;
     setState(() => _bootstrapped = true);
+    // Scan the folder in the background — the shell (and especially the "Add"
+    // tab) is already usable; screens that need notes watch the repository and
+    // fill in when this completes.
+    unawaited(_repository.loadFromDisk());
   }
 
   @override
@@ -78,9 +83,6 @@ class _NoteAppState extends State<NoteApp> {
         appBar: AppBar(title: const Text('Choose a data folder')),
         body: SettingsScreen(repository: _repository),
       );
-    }
-    if (_repository.isLoading) {
-      return const _LoadingScaffold(message: 'Loading notes…');
     }
     return HomeShell(repository: _repository);
   }

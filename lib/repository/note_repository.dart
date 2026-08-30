@@ -10,18 +10,13 @@ import '../models/note.dart';
 
 const _prefsFolderKey = 'data_folder';
 
-/// Reads and JSON-decodes every `*.json` note file in [folderPath]. Runs in a
-/// background isolate via [compute] so scanning thousands of files never blocks
-/// the UI thread. Files that don't parse to a JSON object are skipped, never
-/// fatal.
-///
-/// Each entry has three keys: `path` (the file's path), `image` (its resolved
-/// image path, or an empty string) and `note` (the decoded JSON object). All
-/// values are plain maps/lists/strings so the result crosses the isolate
-/// boundary cleanly.
-List<Map<String, dynamic>> parseFolderIsolate(String folderPath) {
+/// Reads, JSON-decodes and builds a [NoteFile] for every `*.json` note file in
+/// [folderPath]. Runs in a background isolate via [compute] so scanning
+/// thousands of files — and turning them into model objects — never blocks the
+/// UI thread. Files that don't parse to a JSON object are skipped, never fatal.
+List<NoteFile> parseFolderIsolate(String folderPath) {
   final dir = Directory(folderPath);
-  final results = <Map<String, dynamic>>[];
+  final results = <NoteFile>[];
   if (!dir.existsSync()) return results;
 
   // Index `images/` once: note-stem -> newest matching image path. Filenames
@@ -54,11 +49,11 @@ List<Map<String, dynamic>> parseFolderIsolate(String folderPath) {
     try {
       final decoded = jsonDecode(entity.readAsStringSync());
       if (decoded is! Map) continue; // not a note object — skip, don't fail
-      results.add({
-        'path': entity.path,
-        'image': imageByStem[p.basenameWithoutExtension(entity.path)] ?? '',
-        'note': Map<String, dynamic>.from(decoded),
-      });
+      results.add(NoteFile.fromJson(
+        entity,
+        Map<String, dynamic>.from(decoded),
+        imagePath: imageByStem[p.basenameWithoutExtension(entity.path)],
+      ));
     } catch (_) {
       // Skip unreadable / unparseable files.
     }
@@ -83,6 +78,12 @@ class NoteRepository extends ChangeNotifier {
   String? loadError;
 
   List<NoteFile> _notes = [];
+
+  /// Notes created via [addNote] while a [loadFromDisk] is still in flight. The
+  /// isolate's scan started before these files existed, so its result won't
+  /// contain them; they're merged back in when the load lands.
+  final List<NoteFile> _addedDuringLoad = [];
+
   final Random _random = Random();
 
   final List<_PendingDelete> _pending = [];
@@ -92,12 +93,13 @@ class NoteRepository extends ChangeNotifier {
 
   List<NoteFile> get notes => List.unmodifiable(_notes);
 
+  /// Restores the persisted folder path only. This is fast and must finish
+  /// before the first frame; the actual note scan is deliberately left to a
+  /// separate, unawaited [loadFromDisk] so the UI (notably the "Add" tab, which
+  /// needs no notes) paints immediately.
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     folderPath = prefs.getString(_prefsFolderKey);
-    if (folderPath != null) {
-      await loadFromDisk();
-    }
   }
 
   Future<void> setFolder(String path) async {
@@ -111,25 +113,25 @@ class NoteRepository extends ChangeNotifier {
     if (folderPath == null) return;
     isLoading = true;
     loadError = null;
+    _addedDuringLoad.clear();
     notifyListeners();
 
     try {
-      final parsed = await compute(parseFolderIsolate, folderPath!);
+      final loaded = await compute(parseFolderIsolate, folderPath!);
+      // Anything added while the scan ran isn't in [loaded] — fold it back in,
+      // skipping any file the scan happened to pick up anyway.
+      final loadedPaths = {for (final n in loaded) n.file.path};
       _notes = [
-        for (final entry in parsed)
-          NoteFile.fromJson(
-            File(entry['path'] as String),
-            Map<String, dynamic>.from(entry['note'] as Map),
-            imagePath: (entry['image'] as String).isEmpty
-                ? null
-                : entry['image'] as String,
-          ),
+        ...loaded,
+        for (final n in _addedDuringLoad)
+          if (!loadedPaths.contains(n.file.path)) n,
       ];
     } catch (e) {
       loadError = e.toString();
       _notes = [];
     }
 
+    _addedDuringLoad.clear();
     isLoading = false;
     notifyListeners();
   }
@@ -222,6 +224,7 @@ class NoteRepository extends ChangeNotifier {
     final note = NoteFile(file: file, body: text);
     await note.save();
     _notes.add(note);
+    if (isLoading) _addedDuringLoad.add(note);
     notifyListeners();
     return note;
   }

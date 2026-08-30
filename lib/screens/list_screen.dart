@@ -124,7 +124,13 @@ class _ListScreenState extends State<ListScreen> {
           const SizedBox(height: 12),
           Expanded(
             child: notes.isEmpty
-                ? const Center(child: Text('No notes found'))
+                ? Center(
+                    child: Text(
+                      widget.repository.isLoading
+                          ? 'Loading notes…'
+                          : 'No notes found',
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: notes.length,
                     separatorBuilder: (context, index) => const Divider(height: 1),

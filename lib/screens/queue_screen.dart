@@ -29,6 +29,7 @@ class _QueueScreenState extends State<QueueScreen> {
   void initState() {
     super.initState();
     _current = widget.repository.randomNotes(_batchSize);
+    widget.repository.addListener(_onRepositoryChanged);
     // Filter on blur/submit rather than on every keystroke.
     _filterFocus.addListener(() {
       if (!_filterFocus.hasFocus) _onFilterChanged();
@@ -37,9 +38,23 @@ class _QueueScreenState extends State<QueueScreen> {
 
   @override
   void dispose() {
+    widget.repository.removeListener(_onRepositoryChanged);
     _filterController.dispose();
     _filterFocus.dispose();
     super.dispose();
+  }
+
+  /// The first batch is drawn in [initState], which on a cold start runs before
+  /// the background load has any notes. Draw one once notes arrive; leave a
+  /// batch the user is already looking at untouched.
+  void _onRepositoryChanged() {
+    if (!mounted || _current.isNotEmpty) return;
+    setState(() {
+      _current = widget.repository.randomNotes(
+        _batchSize,
+        query: _filterController.text,
+      );
+    });
   }
 
   void _onFilterChanged() {
@@ -97,7 +112,13 @@ class _QueueScreenState extends State<QueueScreen> {
         children: [
           Expanded(
             child: _current.isEmpty
-                ? const Center(child: Text('No notes found'))
+                ? Center(
+                    child: Text(
+                      widget.repository.isLoading
+                          ? 'Loading notes…'
+                          : 'No notes found',
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: _current.length,
                     separatorBuilder: (context, index) => const Divider(height: 24),

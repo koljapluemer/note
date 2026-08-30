@@ -47,7 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Text(repo.folderPath ?? 'Not set'),
         const SizedBox(height: 4),
         Text(
-          '${repo.count} notes loaded',
+          repo.isLoading ? 'Loading notes…' : '${repo.count} notes loaded',
           style: theme.textTheme.bodySmall,
         ),
         if (repo.loadError != null) ...[
