@@ -92,35 +92,10 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   }
 
   Future<void> _editExtraContent() async {
-    final controller = TextEditingController(text: _extraContent);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Extra content'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: null,
-          minLines: 6,
-          textAlignVertical: TextAlignVertical.top,
-          decoration: const InputDecoration(
-            hintText: 'Extra content…',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
+      builder: (context) => _ExtraContentDialog(initialValue: _extraContent),
     );
-    controller.dispose();
     if (result != null) setState(() => _extraContent = result.trim());
   }
 
@@ -408,6 +383,62 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Content editor shown by [_NoteFormScreenState._editExtraContent]. It owns
+/// its own [TextEditingController] so the controller is disposed in
+/// [State.dispose] — i.e. only once the dialog route has finished animating out
+/// and actually unmounted. Disposing it synchronously after `showDialog`
+/// returns races the dialog's exit animation (and, on mobile, the soft-keyboard
+/// inset animation), tearing the controller out from under a still-mounted
+/// [EditableText] and corrupting focus/inherited-widget bookkeeping — which
+/// later trips `assert(_dependents.isEmpty)` in framework.dart when the form
+/// route is popped on save.
+class _ExtraContentDialog extends StatefulWidget {
+  const _ExtraContentDialog({required this.initialValue});
+
+  final String initialValue;
+
+  @override
+  State<_ExtraContentDialog> createState() => _ExtraContentDialogState();
+}
+
+class _ExtraContentDialogState extends State<_ExtraContentDialog> {
+  late final _controller = TextEditingController(text: widget.initialValue);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Extra content'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: null,
+        minLines: 6,
+        textAlignVertical: TextAlignVertical.top,
+        decoration: const InputDecoration(
+          hintText: 'Extra content…',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('Done'),
+        ),
+      ],
     );
   }
 }
