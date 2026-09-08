@@ -287,7 +287,7 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
   }
 
   Future<void> _save() async {
-    final text = collapseNewlines(_controller.text);
+    final text = _controller.text.trim();
     if (text.isEmpty && !_hasImage) return;
 
     setState(() => _saving = true);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../models/note.dart';
 import '../repository/note_repository.dart';
@@ -169,7 +170,9 @@ class _QueueScreenState extends State<QueueScreen> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: showText
-                    ? Text(note.body.isEmpty ? '(empty note)' : note.body)
+                    ? (note.body.isEmpty
+                        ? const Text('(empty note)')
+                        : MarkdownBody(data: note.body))
                     : const SizedBox.shrink(),
               ),
             ),

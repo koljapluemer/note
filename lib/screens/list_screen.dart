@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../models/note.dart';
 import '../repository/note_repository.dart';
@@ -55,6 +56,23 @@ class _ListScreenState extends State<ListScreen> {
   }
 
   void _onRepositoryChanged() => setState(() {});
+
+  /// Opens the note's full body in a modal, rendered as Markdown.
+  Future<void> _open(NoteFile note) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+          child: Markdown(
+            data: note.body.trim().isEmpty ? '_(empty note)_' : note.body,
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(20),
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _edit(NoteFile note) async {
     await Navigator.push(
@@ -161,6 +179,11 @@ class _ListScreenState extends State<ListScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              icon: const Icon(Icons.open_in_full),
+                              tooltip: 'Open',
+                              onPressed: () => _open(note),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.edit_outlined),
                               tooltip: 'Edit',
