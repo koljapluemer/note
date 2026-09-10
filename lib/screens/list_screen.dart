@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -59,6 +60,7 @@ class _ListScreenState extends State<ListScreen> {
 
   /// Opens the note's full body in a modal, rendered as Markdown.
   Future<void> _open(NoteFile note) async {
+    unawaited(note.markOpened());
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog(
@@ -75,6 +77,7 @@ class _ListScreenState extends State<ListScreen> {
   }
 
   Future<void> _edit(NoteFile note) async {
+    unawaited(note.markOpened());
     await Navigator.push(
       context,
       MaterialPageRoute(

@@ -35,6 +35,13 @@ const Set<String> supportedImageExtensions = {
 /// unrecognised top-level keys are likewise kept and written back untouched, so
 /// nothing a third party adds is lost on the next edit.
 ///
+/// Four optional ISO-8601 timestamps track the note's lifecycle: `created`,
+/// `updated` and `opened` are maintained by this app (see [markCreated],
+/// [markOpened] and the mutating setters); `relationshipsChanged` is only
+/// round-tripped for external tooling. Any of the four that is present but not
+/// a parseable timestamp is left in the passthrough bucket and written back
+/// verbatim rather than being regenerated.
+///
 /// An optional image still lives as a real file in the sibling `images/` folder
 /// as `<name>-<timestamp><ext>` (the timestamp makes every replacement a
 /// brand-new path, side-stepping Flutter's path-keyed image cache). It is found
@@ -46,11 +53,19 @@ class NoteFile {
     String extraContent = '',
     String? imagePath,
     Map<String, String>? rels,
+    DateTime? created,
+    DateTime? updated,
+    DateTime? opened,
+    DateTime? relationshipsChanged,
     Map<String, dynamic>? passthroughKeys,
   })  : _body = body,
         _extraContent = extraContent,
         _imagePath = imagePath,
         _rels = {...?rels},
+        _created = created,
+        _updated = updated,
+        _opened = opened,
+        _relationshipsChanged = relationshipsChanged,
         _passthrough = {...?passthroughKeys};
 
   /// Builds a note from the decoded JSON object of [file]. Missing or
@@ -68,10 +83,29 @@ class NoteFile {
       rawRels.forEach((k, v) => rels['$k'] = v is String ? v : '$v');
     }
 
+    // Parse the lifecycle timestamps. A value that isn't a parseable ISO-8601
+    // string degrades to null here and is left in [_passthrough] below, so a
+    // third party's malformed stamp round-trips untouched instead of vanishing.
+    DateTime? parseStamp(Object? raw) =>
+        raw is String ? DateTime.tryParse(raw) : null;
+    final created = parseStamp(json['created']);
+    final updated = parseStamp(json['updated']);
+    final opened = parseStamp(json['opened']);
+    final relationshipsChanged = parseStamp(json['relationshipsChanged']);
+
     // Keys we regenerate from our own fields on write. A malformed `rels`
-    // (present but not an object) is deliberately left out of this set so it
-    // falls through to [_passthrough] and round-trips untouched.
-    final owned = {'body', 'extra', if (relsIsObject) 'rels'};
+    // (present but not an object), or a timestamp we couldn't parse, is
+    // deliberately left out of this set so it falls through to [_passthrough]
+    // and round-trips untouched.
+    final owned = {
+      'body',
+      'extra',
+      if (relsIsObject) 'rels',
+      if (created != null) 'created',
+      if (updated != null) 'updated',
+      if (opened != null) 'opened',
+      if (relationshipsChanged != null) 'relationshipsChanged',
+    };
 
     return NoteFile(
       file: file,
@@ -79,6 +113,10 @@ class NoteFile {
       extraContent: json['extra'] is String ? json['extra'] as String : '',
       imagePath: imagePath,
       rels: rels,
+      created: created,
+      updated: updated,
+      opened: opened,
+      relationshipsChanged: relationshipsChanged,
       passthroughKeys: {
         for (final entry in json.entries)
           if (!owned.contains(entry.key)) entry.key: entry.value,
@@ -91,6 +129,10 @@ class NoteFile {
   String _extraContent;
   String? _imagePath;
   Map<String, String> _rels;
+  DateTime? _created;
+  DateTime? _updated;
+  DateTime? _opened;
+  final DateTime? _relationshipsChanged;
   final Map<String, dynamic> _passthrough;
 
   String get body => _body;
@@ -101,6 +143,24 @@ class NoteFile {
   /// by this app — only round-tripped to disk. Returns an unmodifiable view;
   /// use [setRels] to change it.
   Map<String, String> get rels => Map.unmodifiable(_rels);
+
+  /// When the note was first created, or null for notes written before
+  /// lifecycle tracking existed. Stored as an ISO-8601 UTC string.
+  DateTime? get created => _created;
+
+  /// When the note's stored fields (body, extra content or `rels`) last
+  /// changed. Stored as an ISO-8601 UTC string.
+  DateTime? get updated => _updated;
+
+  /// When the note was last surfaced to the user — drawn into the queue, or
+  /// opened from the list via the view or edit screen. Every content edit
+  /// bumps it too. Stored as an ISO-8601 UTC string.
+  DateTime? get opened => _opened;
+
+  /// External-tooling timestamp marking when the note's relationships last
+  /// changed. This app never reads it for anything or updates it; it is only
+  /// round-tripped to disk so nothing is lost.
+  DateTime? get relationshipsChanged => _relationshipsChanged;
 
   /// Absolute path of the attached image, or null when the note has none.
   String? get imagePath => _imagePath;
@@ -138,6 +198,11 @@ class NoteFile {
         'body': _body,
         if (_extraContent.isNotEmpty) 'extra': _extraContent,
         if (_rels.isNotEmpty) 'rels': _rels,
+        if (_created != null) 'created': _created!.toIso8601String(),
+        if (_updated != null) 'updated': _updated!.toIso8601String(),
+        if (_opened != null) 'opened': _opened!.toIso8601String(),
+        if (_relationshipsChanged != null)
+          'relationshipsChanged': _relationshipsChanged.toIso8601String(),
       };
 
   static const JsonEncoder _encoder = JsonEncoder.withIndent('  ');
@@ -150,13 +215,42 @@ class NoteFile {
     await tmp.rename(file.path);
   }
 
+  /// Stamps [created] — and, because a fresh note is also considered just
+  /// updated and just opened, [updated] and [opened] — then persists. Called
+  /// once by the repository immediately after a new note file is built.
+  Future<void> markCreated() async {
+    final now = DateTime.now().toUtc();
+    _created = now;
+    _updated = now;
+    _opened = now;
+    await save();
+  }
+
+  /// Stamps [opened] with the current time and persists. Call whenever the
+  /// note is shown to the user: drawn into the queue, or opened from the list
+  /// via the view or edit screen. Content is left untouched.
+  Future<void> markOpened() async {
+    _opened = DateTime.now().toUtc();
+    await save();
+  }
+
+  /// Bumps [updated] and [opened] to now — any edit means the user was looking
+  /// at the note. Called by the mutating setters just before they persist.
+  void _stampUpdated() {
+    final now = DateTime.now().toUtc();
+    _updated = now;
+    _opened = now;
+  }
+
   Future<void> setBody(String text) async {
     _body = text;
+    _stampUpdated();
     await save();
   }
 
   Future<void> setExtraContent(String text) async {
     _extraContent = text;
+    _stampUpdated();
     await save();
   }
 
@@ -165,6 +259,7 @@ class NoteFile {
   /// write-only passenger.
   Future<void> setRels(Map<String, String> value) async {
     _rels = {...value};
+    _stampUpdated();
     await save();
   }
 

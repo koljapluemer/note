@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -29,7 +31,7 @@ class _QueueScreenState extends State<QueueScreen> {
   @override
   void initState() {
     super.initState();
-    _current = widget.repository.randomNotes(_batchSize);
+    _current = _drawBatch();
     widget.repository.addListener(_onRepositoryChanged);
     // Filter on blur/submit rather than on every keystroke.
     _filterFocus.addListener(() {
@@ -45,35 +47,34 @@ class _QueueScreenState extends State<QueueScreen> {
     super.dispose();
   }
 
+  /// Draws a fresh batch and stamps every note in it as opened — appearing in
+  /// the queue counts as the user having seen it. The stamp writes run in the
+  /// background; the batch is returned synchronously.
+  List<NoteFile> _drawBatch() {
+    final batch = widget.repository.randomNotes(
+      _batchSize,
+      query: _filterController.text,
+    );
+    for (final note in batch) {
+      unawaited(note.markOpened());
+    }
+    return batch;
+  }
+
   /// The first batch is drawn in [initState], which on a cold start runs before
   /// the background load has any notes. Draw one once notes arrive; leave a
   /// batch the user is already looking at untouched.
   void _onRepositoryChanged() {
     if (!mounted || _current.isNotEmpty) return;
-    setState(() {
-      _current = widget.repository.randomNotes(
-        _batchSize,
-        query: _filterController.text,
-      );
-    });
+    setState(() => _current = _drawBatch());
   }
 
   void _onFilterChanged() {
-    setState(
-      () => _current = widget.repository.randomNotes(
-        _batchSize,
-        query: _filterController.text,
-      ),
-    );
+    setState(() => _current = _drawBatch());
   }
 
   void _next() {
-    setState(
-      () => _current = widget.repository.randomNotes(
-        _batchSize,
-        query: _filterController.text,
-      ),
-    );
+    setState(() => _current = _drawBatch());
   }
 
   Future<void> _edit(NoteFile note) async {

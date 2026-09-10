@@ -222,7 +222,7 @@ class NoteRepository extends ChangeNotifier {
     final file = File(p.join(folder, filename));
 
     final note = NoteFile(file: file, body: text);
-    await note.save();
+    await note.markCreated();
     _notes.add(note);
     if (isLoading) _addedDuringLoad.add(note);
     notifyListeners();
